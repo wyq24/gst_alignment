@@ -1,5 +1,5 @@
 # gst_alignment
-Usage:
+## Usage:  
   0: Clone the code to your machine.  
   1: Create a new venv(highly recommanded) with conda: `conda env create -f gst_alignment.yaml`  
   2: Activate the venv: `conda activate gst_env`  
