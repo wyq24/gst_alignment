@@ -38,6 +38,7 @@ _center_mask1 = 0.7
 _center_mask2 = 0.5
 # --------------------Feature calculation-------------------------
 MAX_MATCHES = 70
+# control the scale of the feature
 SCALE_FACTOR = 1.07
 #-----------------Featrue Matching-------------------
 mratio = 0.95
