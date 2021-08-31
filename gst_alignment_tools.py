@@ -10,6 +10,7 @@ import numpy as np
 import enhance
 from scipy.ndimage import rotate as sci_rotate
 import cv2
+import imageio
 
 
 #def halpha_sat_correction_line_by_line(halpha_fits_file):
@@ -80,7 +81,7 @@ def compared_arraies(fitsfile, ref_fitsfile, tar_resized=True):
                 cur_location[1] - cur_map.meta['naxis2'] * cur_map.meta['cdelt2']],
                [cur_location[0] + cur_map.meta['naxis1'] * cur_map.meta['cdelt1'],
                 cur_location[1] + cur_map.meta['naxis2'] * cur_map.meta['cdelt2']]]
-    print('use {} as the FOV'.format(cur_fov))
+    print('Double the FOV of the gst img to draw the reference img, {0}'.format(cur_fov))
     ref_map = smap.Map(ref_fitsfile)
     if ref_map.meta.has_key('detector'):
         if ref_map.meta['detector'] == 'HMI':
@@ -147,8 +148,8 @@ def convert_matrix(inp_matrix):
     print('costheta.R and sin~~~ are :', inp_matrix[0,0] ,inp_matrix[0,1])
     cscaling = np.sqrt(inp_matrix[0,0]**2 + inp_matrix[0,1]**2)
     ctranslation_xy = [inp_matrix[0,2], inp_matrix[1,2]]
-    crotation = np.arccos(inp_matrix[0,0]/cscaling)
-    print('Scaling factor is {}, translation is [{},{}] arcsec, rotation is {} degree with respect to the central point of the image'.format(cscaling,ctranslation_xy[0],ctranslation_xy[1],crotation))
+    crotation = np.arccos(inp_matrix[0,0]/cscaling)*(180./np.pi)
+    print('Scaling factor is {}, translation is [{},{}] arcsec, rotation is {} degree(unti-clockwised) with respect to the central point of the image'.format(cscaling,ctranslation_xy[0],ctranslation_xy[1],crotation))
     return (cscaling,ctranslation_xy,crotation)
 
 def apply_trans_to_fitsfile(inp_fitsfile, inp_trans):
@@ -161,19 +162,17 @@ def apply_trans_to_fitsfile(inp_fitsfile, inp_trans):
     cur_map.meta['CRVAL1'] += inp_trans[1][0]
     cur_map.meta['CRVAL2'] += inp_trans[1][1]
     #cur_map.meta['solar_p'] += (inp_trans[2])
-    cur_map.meta['CDELT1'] *= inp_trans[0]
-    cur_map.meta['CDELT2'] *= inp_trans[0]
-    cur_map = cur_map.rotate(angle=(inp_trans[2]) * u.deg)
-    cur_map.meta['naxis1']  = cur_map.data.shape[0]
-    cur_map.meta['naxis2']  = cur_map.data.shape[1]
-    #print('deltas are ', cur_map.meta['CDELT1'], cur_map.meta['CDELT2'])
+    cur_map.meta['CDELT1'] /= inp_trans[0]
+    cur_map.meta['CDELT2'] /= inp_trans[0]
+    cur_data = sci_rotate(cur_map.data, inp_trans[2], reshape=False)
+    new_map = smap.Map(cur_data, cur_map.meta)
     print('Aligned fits file is saved to ', outp_file)
-    cur_map.save(outp_file)
+    new_map.save(outp_file)
     return outp_file
 
-def flick_images(aligned_fitsfile, ref_fitsfile,img_dir):
+def flicker_images(aligned_fitsfile, ref_fitsfile,img_dir):
     #cfov = [[860.0, -20.0], [940.0, 60.0]]
-    cfov = [[-240, 740], [-160, 820]]
+    cfov = get_fov_of_map(aligned_fitsfile,half=True)
     aligned_map = smap.Map(aligned_fitsfile)
     sub_aligned_map = make_sub_map(aligned_map,fov = cfov)
     ref_map = smap.Map(ref_fitsfile)
@@ -181,14 +180,29 @@ def flick_images(aligned_fitsfile, ref_fitsfile,img_dir):
         if ref_map.meta['detector'] == 'HMI':
             ref_map = ref_map.rotate(angle=180 * u.deg)
     sub_ref_map = make_sub_map(ref_map, fov=cfov)
+    ali_Gray = np.array(sub_aligned_map.data * 255 / np.nanmax(sub_aligned_map.data), dtype=np.uint8)
+    ref_Gray = np.array(sub_ref_map.data * 255 / np.nanmax(sub_ref_map.data), dtype=np.uint8)
+    ali_Gray = resize(ali_Gray,ref_Gray.shape)
+    img_list = []
+    img_list.append(ali_Gray)
+    img_list.append(ref_Gray)
+    imageio.mimsave(os.path.join(img_dir,'flick.gif'), img_list, fps=4)
+    '''
     fig, cax = plt.subplots(figsize=(6, 6))
-    cax.imshow(sub_aligned_map.data, origin='lower')
+    im1 = cax.imshow(sub_aligned_map.data, origin='lower')
     plt.savefig(os.path.join(img_dir,'aligned.png'))
     cax.clear()
-    cax.imshow(sub_ref_map.data, origin='lower')
+    im2 = cax.imshow(sub_ref_map.data, origin='lower')
     #print('Am I here?')
     plt.savefig(os.path.join(img_dir,'ref.png'))
+    img_list = []
+    for ii in range(10):
+        img_list.append(resize())
+        img_list.append(im2)
+    imageio.mimsave(os.path.join(img_dir,'flick.gif'), img_list)
     print('imgs are saved as {0} and {1}'.format(os.path.join(img_dir,'aligned.png'), os.path.join(img_dir,'ref.png')))
+    '''
+    print('flicker gif is saved to {}'.format(os.path.join(img_dir,'flick.gif')))
     return
 
 def enhance_image(inp_data,f_size,gamma=3.5):
@@ -219,6 +233,23 @@ def define_mask(center_mask1,center_mask2, im1, im2):
     y2 = int(im2.shape[1] * (0.5 + center_mask2 / 2))
     cv2.rectangle(mask2, (x1, y1), (x2, y2), (255), thickness=-1)
     return mask1, mask2
+
+def get_fov_of_map(inp_fits, half=False):
+    inp_map = smap.Map(inp_fits)
+    pix_bole_coor = inp_map.pixel_to_world(0 * u.pix, 0 * u.pix)
+    pix_tori_coor = inp_map.pixel_to_world((inp_map.data.shape[0]-1) * u.pix, (inp_map.data.shape[1]-1) * u.pix)
+    bole_wx = pix_bole_coor.Tx.value
+    bole_wy = pix_bole_coor.Ty.value
+    tori_wx = pix_tori_coor.Tx.value
+    tori_wy = pix_tori_coor.Ty.value
+    if half:
+        hbole_wx = (bole_wx+tori_wx)/2.0 - (tori_wx-bole_wx)/4.0
+        htori_wx = (bole_wx+tori_wx)/2.0 + (tori_wx-bole_wx)/4.0
+        hbole_wy = (bole_wy+tori_wy)/2.0 - (tori_wy-bole_wy)/4.0
+        htori_wy = (bole_wy+tori_wy)/2.0 + (tori_wy-bole_wy)/4.0
+        return [[hbole_wx, hbole_wy], [htori_wx, htori_wy]]
+    else:
+        return [[bole_wx, bole_wy],[tori_wx, tori_wy]]
 
 
 
