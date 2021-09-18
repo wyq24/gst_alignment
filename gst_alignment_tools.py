@@ -172,7 +172,7 @@ def apply_trans_to_fitsfile(inp_fitsfile, inp_trans):
     # cur_map.meta['solar_p'] += (inp_trans[2])
     cur_map.meta['CDELT1'] /= inp_trans[0]
     cur_map.meta['CDELT2'] /= inp_trans[0]
-    cur_data = sci_rotate(cur_map.data, inp_trans[2], reshape=False)
+    cur_data = sci_rotate(cur_map.data, -inp_trans[2], reshape=False)
     new_map = smap.Map(cur_data, cur_map.meta)
     print('Aligned fits file is saved to ', outp_file)
     new_map.save(outp_file)
